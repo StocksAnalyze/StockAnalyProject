@@ -1,6 +1,8 @@
 import pandas as pd
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from typing import (TypeVar, Optional)
+import bson
 import pymongo
 
 ID_PASSWD_FILE = "password"
@@ -96,6 +98,42 @@ class MongoDB:
 
         return True
 
+    def insert_list(self, dbName:str, tableName:str, company:list, queryList: list, primaryKey="", primaryKeySet=False, client=None):
+        ''' list 단위로 db에 집어 넣는
+         _ Junhyeong (20190511) - 03.24
+        :param dbName: Database Name
+        :param tableName: table Name
+        :param company: [회사명, Ticker]
+        :param queryList: query List
+        :param primaryKey: PK 설정 시 index 이름
+        :param primaryKeySet: PK 설정여부
+        :return: 성공 시 True 에러시 False
+        '''
+        if client is None:
+            client = self.client
+        db = client[dbName]
+        collections = db[tableName]
+
+        query = {
+            "$or": [
+                {"회사명": company[0]},
+                {"티커": company[0]}
+            ]
+        }
+
+        document = collections.find_one(query)
+        if document:
+            for ql in queryList:
+                collections.update_many(query, {"$push": {"data": ql}})
+        else:
+            com, ticker = company
+            make_query = {"회사명": com, "티커": ticker, "data": queryList}
+            if primaryKeySet:
+                make_query["_id"] = primaryKey
+            collections.insert_one(make_query)
+
+
+
     def read(self, dbname: str, tablename: str, query={}, client=None) -> list:
         ''' MongoDB 에서 dbName.tablename 에 해당하는 모든 Record 를 dictionary List 형태로 반환
         _ Junhyeong (20190511)
@@ -133,7 +171,7 @@ class MongoDB:
         else:
             return collections.find(query, sort=[(idx, pymongo.ASCENDING)]).limit(limits)
 
-    def read_last_one(self, dbname: str, tablename: str, idx="", query={1}, limits=1, client=None) -> dict:
+    def read_last_one(self, dbname: str, tablename: str, idx="", query={}, limits=1, client=None) -> dict:
         ''' MongoDB 에서 dbName.tableName 에 해당 하는 가장 마지막 record 반환
          _ Junhyeong (20190511)
         :param dbname: Database Name
@@ -146,10 +184,54 @@ class MongoDB:
             client = self.client
         db = client[dbname]
         collections = db[tablename]
+
         if limits == 1:
             return collections.find_one(query, sort=[(idx, pymongo.DESCENDING)])
         else:
             return collections.find(query, sort=[(idx, pymongo.DESCENDING)]).limit(limits)
+
+    def read_list_obj(self, dbname: str, tablename: str, idx="", query={}, client=None) -> Optional[bson.typings._DocumentType]:
+        if idx == "":
+            idx = "_id"
+        if client is None:
+            client = self.client
+
+        db = client[dbname]
+        collections = db[tablename]
+        return collections.find_one(query)
+
+    def read_last_date(self, dbname: str, tablename: str, query: dict, client=None):
+        if client is None:
+            client = self.client
+        db = client[dbname]
+        collections = db[tablename]
+
+        pipeline = [
+            {"$match": query},
+            {"$project": {"날짜": {"$max": "$data"}}}
+        ]
+
+        result = list(collections.aggregate(pipeline))
+        if result:
+            return result[0]["날짜"]
+        else:
+            return None
+
+    def read_date_limits(self, dbname: str, tablename: str, query: dict, limits=120, client=None):
+        if client is None:
+            client = self.client
+        db = client[dbname]
+        collections = db[tablename]
+
+        pipeline = [
+            {"$match": query},
+            {"$unwind": "$data"},
+            {"$sort": {"data.날짜": -1}},
+            {"$limit": limits}
+        ]
+
+        result = list(collections.aggregate(pipeline))
+        return result["data"]
 
 if __name__ == "__main__":
 
