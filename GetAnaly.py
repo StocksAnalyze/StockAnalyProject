@@ -129,7 +129,7 @@ class StockAnaly:
                     else:
                         df_cals = self.calc_obj.read_days_cals(company)
 
-                    cals_last_date = last_date_analys["날짜"]
+                    analys_last_date = last_date_analys["날짜"]
                     self.read_df_dayinfo = df_info
                     self.read_df_criteria = df_cals
                 else:
@@ -245,20 +245,32 @@ class StockAnaly:
 
     def sma60_direction(self, df_crit: pd.DataFrame, compare=[1, 3, 5, 9, 26]):
         naming = self.anal_namedict["SMA60_check"]
-        self.saved_df[naming] = "down"
+        self.saved_df[naming] = None
+
         mask = True
         for c in compare:
             mask &= (df_crit["SMA60"] > df_crit["SMA60"].shift(c))
         self.saved_df.loc[mask, naming] = "up"
 
+        mask = False
+        for c in compare:
+            mask &= (df_crit["SMA60"] < df_crit["SMA60"].shift(c))
+        self.saved_df.loc[mask, naming] = "down"
+
     # 0-1. 전환/기준선이 붙어있는가..
     def near_line_check(self, df_crit: pd.DataFrame, percent=2):
         naming2 = self.anal_namedict["전기_nearess_check"]
         naming = self.anal_namedict["전기_nearess_check(후행)"]
-        self.saved_df[naming] = "X"
+        self.saved_df[naming] = None
+
         mask = (df_crit[["conversion line", "base line"]].max(axis=1) *
                 (1 - 0.01 * percent) < df_crit[["conversion line", "base line"]].min(axis=1))
         self.saved_df.loc[mask, naming] = "O"
+
+        mask = (df_crit[["conversion line", "base line"]].max(axis=1) *
+                (1 - 0.01 * percent) > df_crit[["conversion line", "base line"]].min(axis=1))
+        self.saved_df.loc[mask, naming] = "X"
+
         self.saved_df[naming2] = self.saved_df[naming].shift(25)
 
     # 1. 평균이동선을 통과했는가?
@@ -267,15 +279,21 @@ class StockAnaly:
             sma_name = "SMA" + str(sma)
             d_key = sma_name + "_cross_check"
             naming = self.anal_namedict[d_key]
-            self.saved_df[naming] = "X"
+            self.saved_df[naming] = None
+
             mask = (df_day["종가"] >= df_crit[sma_name])
             self.saved_df.loc[mask, naming] = "O"
+
+            mask = (df_day["종가"] < df_crit[sma_name])
+            self.saved_df.loc[mask, naming] = "X"
+
 
     # 2. MACD 추이 (Up,Down_Cross)
     def check_macd(self, df_crit: pd.DataFrame(), low=1000):
         naming = self.anal_namedict["MACD_check"]
         # MACD 교차점을 상승하는지점 (매수지점 추천)
         self.saved_df[naming] = "X"
+
         mask = (-low <= df_crit["MACD_Histogram"])  # MACD 교차점이 -1000 ~ 1000 사이인가?
         mask &= (df_crit["MACD_Histogram"] > df_crit["MACD_Histogram"].shift(1))  # MACD 교차점이 5xPecrent 이하인가?
         mask &= (df_crit["MACD"] > 0)  # MACD 값이 0보다 큰가?
@@ -387,11 +405,18 @@ class StockAnaly:
     # 4-2. 현 주가의 스팬 꼬리(3일전부터 모두 상승?) 가 양의 방향인가? + 스팬이 양수인가?
     def check_spantail(self, df_crit: pd.DataFrame):
         naming = self.anal_namedict["스팬꼬리_check"]
-        self.saved_df[naming] = "X"
+        self.saved_df[naming] = None
+
         mask = (df_crit["Future Leading Span A"] > df_crit["Future Leading Span B"])
         mask &= (df_crit["Future Leading Span A"] > df_crit["Future Leading Span A"].shift(1))
         mask &= (df_crit["Future Leading Span A"].shift(1) > df_crit["Future Leading Span A"].shift(2))
         self.saved_df.loc[mask, naming] = "O"
+
+        mask = (df_crit["Future Leading Span A"] < df_crit["Future Leading Span B"])
+        mask |= (df_crit["Future Leading Span A"] < df_crit["Future Leading Span A"].shift(1))
+        mask |= (df_crit["Future Leading Span A"].shift(1) < df_crit["Future Leading Span A"].shift(2))
+        self.saved_df.loc[mask, naming] = "X"
+
 
     # 4-3. 현 주가의 스팬 위치 (up, mid, bot)
     def check_span_position(self, df_day: pd.DataFrame, df_crit: pd.DataFrame):
@@ -463,12 +488,13 @@ class StockAnaly:
                     {"티커": name}
                 ]
             }
-            findingSQL = self.mongo.read_list_obj("DayInfo", "Analys", query, client=self.mongo.client2)
+            findingSQL = self.mongo.read_list_obj("DayInfo", "Analys", query=query, client=self.mongo.client2)
             if findingSQL:
                 return pd.DataFrame(findingSQL["data"]).set_index("날짜")
         except Exception:
             print(f"{name} 는 invalid 데이터 입니다.")
             return pd.DataFrame()
+
 if __name__ == "__main__":
     obj = StockAnaly()
     obj.module(day_info=False, compute_criteria=False)

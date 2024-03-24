@@ -24,9 +24,6 @@ class StockCals:
         if compute_criteria:
             self.module_calc()
 
-
-
-
     ''' A. 주식 계산 메소드 '''
     def module_calc(self):
         ''' 초기 day_info.xlsx 로부터 MACD, 60평균선 등을 계산하는데 사용하는 함수 (전데이터 수정)
@@ -60,6 +57,7 @@ class StockCals:
 
             self.saved_df = pd.DataFrame(index=df.index)
 
+            print(df)
             try:
                 # 1. 주가이동평균 구함.
                 print("{주가이동평균(Moving Average) 계산 중 ...}")
@@ -80,7 +78,6 @@ class StockCals:
             except Exception:
                 continue
 
-            self.saved_df = self.saved_df.reset_index()
             self.saved_df = self.saved_df.reset_index()
             processing_frame = self.saved_df[self.saved_df["날짜"] > cals_last_date]
 
@@ -171,7 +168,7 @@ class StockCals:
                     {"티커": company}
                 ]
             }
-            findingSQL = self.mongo.read_list_obj("DayInfo", "Cals", query)
+            findingSQL = self.mongo.read_list_obj("DayInfo", "Cals", query=query)
             if findingSQL:
                 return pd.DataFrame(findingSQL["data"]).set_index("날짜")
         except Exception:
@@ -182,4 +179,3 @@ if __name__ == "__main__":
     obj = StockCals()
     obj.module()
 
-    #print(obj.read_days_cals("삼성전자"))

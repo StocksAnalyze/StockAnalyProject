@@ -241,11 +241,6 @@ if __name__ == "__main__":
     test = [{"company":"APS", "code":"054620"}, {"company":"AP시스템", "code":"265520"}, {"company":"AP위성", "code":"211270"}, {"company":"3S", "code":"060310"}]
     obj = MongoDB()
 
-    datas = obj.read("DayInfo", "Analys", {
-        "티커": "207940"
-    }, client=obj.client2 )
-
-    for item in datas:
-        print(item)
+    print(obj.read_list_obj("DayInfo", "Info", "", ))
     #bj.insert("StockCode", "KOSDAQ", test, "code", primaryKeySet=True)
     #print(obj.read("StockCode", "KOSPI",  {"company": "동화약품"}))

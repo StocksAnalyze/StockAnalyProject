@@ -127,8 +127,8 @@ class StockKr:
         print("------------------------")
 
         # 전체 파일리스트 관리.
-        #self.thema_total_dict.update(self.thema_KOSPI_tkdict)
-        #self.thema_total_dict.update(self.thema_KOSDAQ_tkdict)
+        self.thema_total_dict.update(self.thema_KOSPI_tkdict)
+        self.thema_total_dict.update(self.thema_KOSDAQ_tkdict)
 
 
     ''' B. Day Information (일봉 시가, 고가, 매도 정보 크롤링...) _ Junhyeong(20190511) '''
@@ -239,7 +239,7 @@ class StockKr:
                     {"티커": company}
                 ]
             }
-            findingSQL = self.mongo.read_list_obj("DayInfo", "Info", query)
+            findingSQL = self.mongo.read_list_obj("DayInfo", "Info", query=query)
             if findingSQL:
                 return pd.DataFrame(findingSQL["data"]).set_index("날짜")
         except Exception:
