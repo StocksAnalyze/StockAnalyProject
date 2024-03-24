@@ -45,17 +45,17 @@ class StockAnaly:
         self.saved_df = pd.DataFrame()
 
         self.anal_namedict = {
-            "SMA60_check": "60일 이동평균선 추이",
-            "전기_nearess_check(후행)": "전환선 기준선 가까움(후행)",
-            "전기_nearess_check": "전환선 기준선 가까움",
-            "MACD_check": "MACD 상태",
-            "후행스팬_line_cross_check": "후행스팬 x 전환선_기준선",
-            "후행스팬_bong_cross_check": "후행스팬 x 봉",
-            "스팬꼬리_check": "선행스팬 꼬리방향",
-            "스팬위치_check": "봉과 구름대",
-            "전_cross_기": "전환선 x 기준선",
-            "봉_cross_전기": "봉 x 전환선_기준선",
-            "어제기준_가격비교": "1일전 가격 비교"
+            "SMA60_check": "60 days MA Trend",
+            "전기_nearess_check(후행)": "Base and Conversion Narrow Status (for Lagging)",
+            "전기_nearess_check": "Base and Conversion Narrow Status",
+            "MACD_check": "MACD Status",
+            "후행스팬_line_cross_check": "Lagging Span x Base and conversion",
+            "후행스팬_bong_cross_check": "Lagging Span x Bong",
+            "스팬꼬리_check": "Leading Span Tail Direction",
+            "스팬위치_check": "Bong and Cloud Status",
+            "전_cross_기": "Conversion x Base line",
+            "봉_cross_전기": "Bong x Base and Conversion",
+            "어제기준_가격비교": "Difference LastDate"
         }
         self.anal_namedict_r = dict()  # 역으로 구성된 딕셔너리.
         # 분석용 DataFrame
@@ -90,13 +90,13 @@ class StockAnaly:
         # X일 이동평균선 통과
         for item in self.sma_window:
             sma_name = "SMA" + str(item) + "_cross_check"
-            dict_name = str(item) + "일 이동평균선 통과여부"
+            dict_name = str(item) + "day cross MA Check"
             self.anal_namedict[sma_name] = dict_name
 
         # x이 최고가 통과여부
         for item in self.high_crit:
             sma_name = str(item) + "_highest_check"
-            dict_name = str(item) + "일 최고가 추이"
+            dict_name = str(item) + "day Highest Price Trend"
             self.anal_namedict[sma_name] = dict_name
 
         self.anal_namedict_r = {value: key for key, value in self.anal_namedict.items()}
@@ -107,81 +107,80 @@ class StockAnaly:
         for company, ticker in self.info_obj.thema_total_dict.items():  # 나중에 이 부분을 건들면 다른 딕셔너리에 대해서도 수행가능.
             analys_last_date = datetime(1999, 1, 1)
             print("[" + company + " 지표 분석 중 ...]")
-            last_analys_30 = self.mongo.read_last_one("DayInfo", "Analys", "날짜", {"티커": ticker}, 30, client=self.mongo.client2)
-            try:
-                analys_last_date = pd.to_datetime(last_analys_30.next()["날짜"])
-                before = self.mongo.read_last_one("DayInfo", "Info", "날짜", {"날짜": {"$lt": analys_last_date}, "티커": ticker}, 120)
-                last_docunment = None
-                for document in before:
-                    last_docunment = document
 
-                after_info = None
-                if last_docunment:
-                    after_info = self.mongo.read("DayInfo", "Info", {"날짜": {"$gte": last_docunment["날짜"]}, "티커": ticker})
-                    after_calc = self.mongo.read("DayInfo", "Cals", {"날짜": {"$gte": last_docunment["날짜"]}, "티커": ticker})
-                    self.read_df_dayinfo = pd.DataFrame(after_info).set_index("날짜").sort_index()
-                    self.read_df_criteria = pd.DataFrame(after_calc).set_index("날짜").sort_index()
-                    info_last_date = self.read_df_dayinfo.tail(1).index
-                    diff_day = info_last_date - analys_last_date
-                    if diff_day.days == 0:
+            try:
+                last_date_info = self.mongo.read_last_date("DayInfo", "Info", {"티커": ticker})
+                last_date_analys = self.mongo.read_last_date("DayInfo", "Analys", {"티커": ticker}, client=self.mongo.client2) # 임시방편
+                if last_date_info and last_date_analys:
+                    difference = last_date_info["날짜"] - last_date_analys["날짜"]
+                    if difference.days == 0:
                         continue
-                if not after_info:
-                    try:
-                        self.read_df_dayinfo = self.info_obj.readDaySQL(company)
-                        self.read_df_criteria = self.calc_obj.read_days_cals(company)
-                    except KeyError:
+                    before_info = self.mongo.read_date_limits("DayInfo", "Info", {"티커": ticker}, limits=difference.days + 120)
+                    before_cals = self.mongo.read_date_limits("DayInfo", "Cals", {"티커": ticker}, limits=difference.days + 120)
+                    df_info = pd.DataFrame(before_info).set_index("날짜")
+                    df_cals = pd.DataFrame(before_cals).set_index("날짜")
+                    if not df_info.empty:
+                        df_info = df_info.iloc[::-1]
+                    else:
+                        df_info = self.info_obj.readDaySQL(company)
+
+                    if not df_cals.empty:
+                        df_cals = df_cals.iloc[::-1]
+                    else:
+                        df_cals = self.calc_obj.read_days_cals(company)
+
+                    cals_last_date = last_date_analys["날짜"]
+                    self.read_df_dayinfo = df_info
+                    self.read_df_criteria = df_cals
+                else:
+                    if not last_date_info:
                         continue
-                    print(self.read_df_criteria)
-            except KeyError:
-                continue
-            except StopIteration:
-                try:
                     self.read_df_dayinfo = self.info_obj.readDaySQL(company)
                     self.read_df_criteria = self.calc_obj.read_days_cals(company)
-                except KeyError:
-                    continue
+            except Exception:
+                self.read_df_dayinfo = self.info_obj.readDaySQL(company)
+                self.read_df_criteria = self.calc_obj.read_days_cals(company)
+            self.saved_df = pd.DataFrame(index=self.read_df_dayinfo.index)
 
-            try:
-                self.saved_df = pd.DataFrame(index=self.read_df_dayinfo.index)
+            # 0. 60일 이동평균선의 추이
+            self.sma60_direction(df_crit=self.read_df_criteria)
 
-                # 0. 60일 이동평균선의 추이
-                self.sma60_direction(df_crit=self.read_df_criteria)
+            # 0-2. 전환선_기준선_가까움
+            self.near_line_check(df_crit=self.read_df_criteria, percent=percent)
+            # 2. MACD 시그널 체킹 (하한~상한 제한걸어둠)
+            self.check_macd(self.read_df_criteria)
+            # 4. 스팬친구들
+            self.cross_backspan_line(df_crit=self.read_df_criteria, percent=percent)
+            self.cross_backspan(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria)
+            self.check_spantail(df_crit=self.read_df_criteria)
+            self.check_span_position(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria)
+            # 5. 전환선 >= 기준선
+            self.span_line_cross(df_crit=self.read_df_criteria, percent=percent)
 
-                # 0-2. 전환선_기준선_가까움
-                self.near_line_check(df_crit=self.read_df_criteria, percent=percent)
-                # 2. MACD 시그널 체킹 (하한~상한 제한걸어둠)
-                self.check_macd(self.read_df_criteria)
-                # 4. 스팬친구들
-                self.cross_backspan_line(df_crit=self.read_df_criteria, percent=percent)
-                self.cross_backspan(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria)
-                self.check_spantail(df_crit=self.read_df_criteria)
-                self.check_span_position(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria)
-                # 5. 전환선 >= 기준선
-                self.span_line_cross(df_crit=self.read_df_criteria, percent=percent)
+            # 6. 봉 >= 기준/전환선
+            self.bong_cross_line(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria, percent=percent)
+            # 1. XX일 이동선을 통과했는가?
+            self.cross_moving_line(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria)
+            # 3. *일 최고가 갱신여부?
+            self.cross_highest_price(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria, percent=percent)
 
-                # 6. 봉 >= 기준/전환선
-                self.bong_cross_line(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria, percent=percent)
-                # 1. XX일 이동선을 통과했는가?
-                self.cross_moving_line(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria)
-                # 3. *일 최고가 갱신여부?
-                self.cross_highest_price(df_day=self.read_df_dayinfo, df_crit=self.read_df_criteria, percent=percent)
+            # OLAP. 전날에 비해 가격상승이 있었는가? --> 실제 사용하기 위해선 shift(1) 해서 비교할 것.
+            self.compare_today_yesterday_price(df_day=self.read_df_dayinfo)
 
-                # OLAP. 전날에 비해 가격상승이 있었는가? --> 실제 사용하기 위해선 shift(1) 해서 비교할 것.
-                self.compare_today_yesterday_price(df_day=self.read_df_dayinfo)
-
-                self.saved_df = self.saved_df.reset_index()
+            self.saved_df = self.saved_df.reset_index()
+            '''
             except KeyError:
                 continue
+            '''
             processing_frame = self.saved_df[self.saved_df["날짜"] > analys_last_date]
             # DataFrame --> Dictionary (열 이름 겹침 워닝은 무시하도록 설정)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")  # 워닝 무시
                 df_to_dict = processing_frame.to_dict(orient="records")
-                for rec in df_to_dict:
-                    rec["회사명"] = company
-                    rec["티커"] = ticker
             print(df_to_dict)
-            self.mongo.insert("DayInfo", "Analys", df_to_dict, primaryKeySet=False, client=self.mongo.client2)
+            self.mongo.insert_list("DayInfo", "Analys", [company, ticker], df_to_dict,
+                                   primaryKey=ticker, primaryKeySet=True, client=self.mongo.client2)
+            #self.mongo.insert("DayInfo", "Analys", df_to_dict, primaryKeySet=False, client=self.mongo.client2)
             #print(processing_frame.tail(5))
 
 
@@ -257,7 +256,8 @@ class StockAnaly:
         naming2 = self.anal_namedict["전기_nearess_check"]
         naming = self.anal_namedict["전기_nearess_check(후행)"]
         self.saved_df[naming] = "X"
-        mask = (df_crit[["전환선", "기준선"]].max(axis=1) * (1 - 0.01 * percent) < df_crit[["전환선", "기준선"]].min(axis=1))
+        mask = (df_crit[["conversion line", "base line"]].max(axis=1) *
+                (1 - 0.01 * percent) < df_crit[["conversion line", "base line"]].min(axis=1))
         self.saved_df.loc[mask, naming] = "O"
         self.saved_df[naming2] = self.saved_df[naming].shift(25)
 
@@ -303,7 +303,7 @@ class StockAnaly:
         '''
         for hi in self.high_crit:
             d_key = str(hi) + "_highest_check"
-            df_key = str(hi) + "일_최고가"
+            df_key = str(hi) + "th Highest Price"
             naming = self.anal_namedict[d_key]
             self.saved_df[naming] = "X"
             mask = (df_day["종가"] >= df_crit[df_key] * (1 - 0.01 * percent))
@@ -317,34 +317,34 @@ class StockAnaly:
         naming = self.anal_namedict["후행스팬_line_cross_check"]
         naming2 = self.anal_namedict["전기_nearess_check(후행)"]
         self.saved_df[naming] = "X"
-        mask = (df_crit["후행스팬"] >= df_crit[["전환선", "기준선"]].min(axis=1) * (1 - 0.01 * percent))
+        mask = (df_crit["Lagging Span"] >= df_crit[["conversion line", "base line"]].min(axis=1) * (1 - 0.01 * percent))
         mask &= (self.saved_df[naming2] == "O")
         self.saved_df.loc[
-            mask & (df_crit["후행스팬"] < df_crit[["전환선", "기준선"]].min(axis=1)),
+            mask & (df_crit["Lagging Span"] < df_crit[["conversion line", "base line"]].min(axis=1)),
             naming
         ] = "up_near"
         self.saved_df.loc[
-            mask & (df_crit["후행스팬"] >= df_crit[["전환선", "기준선"]].min(axis=1)),
+            mask & (df_crit["Lagging Span"] >= df_crit[["conversion line", "base line"]].min(axis=1)),
             naming
         ] = "up"
         self.saved_df.loc[
-            mask & (df_crit["후행스팬"] >= df_crit[["전환선", "기준선"]].min(axis=1)) & (
-                    df_crit["후행스팬"].shift(1) < df_crit[["전환선", "기준선"]].min(axis=1).shift(1)),
+            mask & (df_crit["Lagging Span"] >= df_crit[["conversion line", "base line"]].min(axis=1)) & (
+                    df_crit["Lagging Span"].shift(1) < df_crit[["conversion line", "base line"]].min(axis=1).shift(1)),
             naming
         ] = "up_cross"
 
-        mask2 = (df_crit["후행스팬"] < df_crit[["전환선", "기준선"]].max(axis=1) * (1 - 0.01 * percent))
+        mask2 = (df_crit["Lagging Span"] < df_crit[["conversion line", "base line"]].max(axis=1) * (1 - 0.01 * percent))
         self.saved_df.loc[
-            mask2 & (df_crit["후행스팬"] > df_crit[["전환선", "기준선"]].max(axis=1)),
+            mask2 & (df_crit["Lagging Span"] > df_crit[["conversion line", "base line"]].max(axis=1)),
             naming
         ] = "down_near"
         self.saved_df.loc[
-            mask2 & (df_crit["후행스팬"] < df_crit[["전환선", "기준선"]].max(axis=1)),
+            mask2 & (df_crit["Lagging Span"] < df_crit[["conversion line", "base line"]].max(axis=1)),
             naming
         ] = "down"
         self.saved_df.loc[
-            mask2 & (df_crit["후행스팬"] <= df_crit[["전환선", "기준선"]].max(axis=1)) & (
-                    df_crit["후행스팬"].shift(1) > df_crit[["전환선", "기준선"]].max(axis=1).shift(1)),
+            mask2 & (df_crit["Lagging Span"] <= df_crit[["conversion line", "base line"]].max(axis=1)) & (
+                    df_crit["Lagging Span"].shift(1) > df_crit[["conversion line", "base line"]].max(axis=1).shift(1)),
             naming
         ] = "down_cross"
         self.saved_df[naming] = self.saved_df[naming].shift(25)
@@ -354,31 +354,32 @@ class StockAnaly:
 
         check_naming = self.anal_namedict["후행스팬_bong_cross_check"]
         self.saved_df[check_naming] = "X"
-        mask = (df_day["종가"] >= df_crit["후행스팬"] * (1 - 0.01 * percent))
+        mask = (df_day["종가"] >= df_crit["Lagging Span"] * (1 - 0.01 * percent))
         self.saved_df.loc[
-            mask & (df_day["종가"] < df_crit["후행스팬"]),
+            mask & (df_day["종가"] < df_crit["Lagging Span"]),
             check_naming
         ] = "up_near"
         self.saved_df.loc[
-            mask & (df_day["종가"] >= df_crit["후행스팬"]),
+            mask & (df_day["종가"] >= df_crit["Lagging Span"]),
             check_naming
         ] = "up"
         self.saved_df.loc[
-            mask & (df_day["종가"] > df_crit["후행스팬"]) & (df_day["종가"].shift(1) < df_crit["후행스팬"].shift(1)),
+            mask & (df_day["종가"] > df_crit["Lagging Span"]) & (df_day["종가"].shift(1) < df_crit["Lagging Span"].shift(1)),
             check_naming
         ] = "up_cross"
 
-        mask2 = (df_day["종가"] <= df_crit["후행스팬"] * (1 - 0.01 * percent))
+        mask2 = (df_day["종가"] <= df_crit["Lagging Span"] * (1 - 0.01 * percent))
         self.saved_df.loc[
-            mask2 & (df_day["종가"] > df_crit["후행스팬"]),
+            mask2 & (df_day["종가"] > df_crit["Lagging Span"]),
             check_naming
         ] = "down_near"
         self.saved_df.loc[
-            mask2 & (df_day["종가"] <= df_crit["후행스팬"]),
+            mask2 & (df_day["종가"] <= df_crit["Lagging Span"]),
             check_naming
         ] = "down"
         self.saved_df.loc[
-            mask2 & (df_day["종가"] < df_crit["후행스팬"]) & (df_day["종가"].shift(1) > df_crit["후행스팬"].shift(1)),
+            mask2 & (df_day["종가"] < df_crit["Lagging Span"]) &
+            (df_day["종가"].shift(1) > df_crit["Lagging Span"].shift(1)),
             check_naming
         ] = "down_cross"
         self.saved_df[check_naming] = self.saved_df[check_naming].shift(25)
@@ -387,9 +388,9 @@ class StockAnaly:
     def check_spantail(self, df_crit: pd.DataFrame):
         naming = self.anal_namedict["스팬꼬리_check"]
         self.saved_df[naming] = "X"
-        mask = (df_crit["선행스팬1_미래"] > df_crit["선행스팬2_미래"])
-        mask &= (df_crit["선행스팬1_미래"] > df_crit["선행스팬1_미래"].shift(1))
-        mask &= (df_crit["선행스팬1_미래"].shift(1) > df_crit["선행스팬1_미래"].shift(2))
+        mask = (df_crit["Future Leading Span A"] > df_crit["Future Leading Span B"])
+        mask &= (df_crit["Future Leading Span A"] > df_crit["Future Leading Span A"].shift(1))
+        mask &= (df_crit["Future Leading Span A"].shift(1) > df_crit["Future Leading Span A"].shift(2))
         self.saved_df.loc[mask, naming] = "O"
 
     # 4-3. 현 주가의 스팬 위치 (up, mid, bot)
@@ -397,58 +398,58 @@ class StockAnaly:
         naming = self.anal_namedict["스팬위치_check"]
         self.saved_df[naming] = "mid"
 
-        self.saved_df.loc[(df_day["종가"] <= df_crit[["선행스팬1", "선행스팬2"]].min(axis=1)), naming] = "down"
-        self.saved_df.loc[(df_day["종가"] >= df_crit[["선행스팬1", "선행스팬2"]].max(axis=1)), naming] = "up"
+        self.saved_df.loc[(df_day["종가"] <= df_crit[["Leading Span A", "Leading Span B"]].min(axis=1)), naming] = "down"
+        self.saved_df.loc[(df_day["종가"] >= df_crit[["Leading Span A", "Leading Span B"]].max(axis=1)), naming] = "up"
 
     # 5. 전환선 >= 기준선 (통과전, 통과, 통과 후)
     def span_line_cross(self, df_crit: pd.DataFrame, percent=2):
         naming = self.anal_namedict["전_cross_기"]
         self.saved_df[naming] = "X"
-        mask = (df_crit["전환선"] >= df_crit["기준선"] * (1 - 0.01 * percent))
-        self.saved_df.loc[mask & (df_crit["전환선"] < df_crit["기준선"]), naming] = "up_near"
-        self.saved_df.loc[mask & (df_crit["전환선"] >= df_crit["기준선"]), naming] = "up"
-        self.saved_df.loc[mask & (df_crit["전환선"].shift(26) < df_crit["기준선"].shift(26)) & \
-                          (df_crit["전환선"].shift(25) >= df_crit["기준선"].shift(25)), naming] = "up_cross"
+        mask = (df_crit["conversion line"] >= df_crit["base line"] * (1 - 0.01 * percent))
+        self.saved_df.loc[mask & (df_crit["conversion line"] < df_crit["base line"]), naming] = "up_near"
+        self.saved_df.loc[mask & (df_crit["conversion line"] >= df_crit["base line"]), naming] = "up"
+        self.saved_df.loc[mask & (df_crit["conversion line"].shift(26) < df_crit["base line"].shift(26)) & \
+                          (df_crit["conversion line"].shift(25) >= df_crit["base line"].shift(25)), naming] = "up_cross"
 
-        mask2 = (df_crit["전환선"] < df_crit["기준선"] * (1 - 0.01 * percent))
-        self.saved_df.loc[mask2 & (df_crit["전환선"] > df_crit["기준선"]), naming] = "down_near"
-        self.saved_df.loc[mask2 & (df_crit["전환선"] <= df_crit["기준선"]), naming] = "down"
-        self.saved_df.loc[mask2 & (df_crit["전환선"].shift(26) > df_crit["기준선"].shift(26)) & \
-                          (df_crit["전환선"].shift(25) <= df_crit["기준선"].shift(25)), naming] = "down_cross"
+        mask2 = (df_crit["conversion line"] < df_crit["base line"] * (1 - 0.01 * percent))
+        self.saved_df.loc[mask2 & (df_crit["conversion line"] > df_crit["base line"]), naming] = "down_near"
+        self.saved_df.loc[mask2 & (df_crit["conversion line"] <= df_crit["base line"]), naming] = "down"
+        self.saved_df.loc[mask2 & (df_crit["conversion line"].shift(26) > df_crit["base line"].shift(26)) & \
+                          (df_crit["conversion line"].shift(25) <= df_crit["base line"].shift(25)), naming] = "down_cross"
 
     # 6. 봉이 기준선과 전환선을 뚫고 갈려고 하는가? (+ 기준선+전환선이 붙어있어야함)
     def bong_cross_line(self, df_day: pd.DataFrame, df_crit: pd.DataFrame, percent=2):
         naming = self.anal_namedict["봉_cross_전기"]
         naming2 = self.anal_namedict["전기_nearess_check"]
         self.saved_df[naming] = "X"
-        mask = (df_day["종가"] >= df_crit[["전환선", "기준선"]].min(axis=1) * (1 - 0.01 * percent))
+        mask = (df_day["종가"] >= df_crit[["conversion line", "base line"]].min(axis=1) * (1 - 0.01 * percent))
         mask &= (self.saved_df[naming2] == "O")
         self.saved_df.loc[
-            mask & (df_day["종가"] < df_crit[["전환선", "기준선"]].min(axis=1)),
+            mask & (df_day["종가"] < df_crit[["conversion line", "base line"]].min(axis=1)),
             naming
         ] = "up_near"
         self.saved_df.loc[
-            mask & (df_day["종가"] >= df_crit[["전환선", "기준선"]].min(axis=1)),
+            mask & (df_day["종가"] >= df_crit[["conversion line", "base line"]].min(axis=1)),
             naming
         ] = "up"
         self.saved_df.loc[
-            mask & (df_day["종가"] >= df_crit[["전환선", "기준선"]].min(axis=1)) & (
-                    df_day["종가"].shift(1) < df_crit[["전환선", "기준선"]].min(axis=1).shift(1)),
+            mask & (df_day["종가"] >= df_crit[["conversion line", "base line"]].min(axis=1)) & (
+                    df_day["종가"].shift(1) < df_crit[["conversion line", "base line"]].min(axis=1).shift(1)),
             naming
         ] = "up_cross"
 
-        mask2 = (df_day["종가"] < df_crit[["전환선", "기준선"]].max(axis=1) * (1 - 0.01 * percent))
+        mask2 = (df_day["종가"] < df_crit[["conversion line", "base line"]].max(axis=1) * (1 - 0.01 * percent))
         self.saved_df.loc[
-            mask2 & (df_day["종가"] > df_crit[["전환선", "기준선"]].max(axis=1)),
+            mask2 & (df_day["종가"] > df_crit[["conversion line", "base line"]].max(axis=1)),
             naming
         ] = "down_near"
         self.saved_df.loc[
-            mask2 & (df_day["종가"] < df_crit[["전환선", "기준선"]].max(axis=1)),
+            mask2 & (df_day["종가"] < df_crit[["conversion line", "base line"]].max(axis=1)),
             naming
         ] = "down"
         self.saved_df.loc[
-            mask2 & (df_day["종가"] <= df_crit[["전환선", "기준선"]].max(axis=1)) & (
-                    df_day["종가"].shift(1) > df_crit[["전환선", "기준선"]].max(axis=1).shift(1)),
+            mask2 & (df_day["종가"] <= df_crit[["conversion line", "base line"]].max(axis=1)) & (
+                    df_day["종가"].shift(1) > df_crit[["conversion line", "base line"]].max(axis=1).shift(1)),
             naming
         ] = "down_cross"
 
@@ -462,14 +463,13 @@ class StockAnaly:
                     {"티커": name}
                 ]
             }
-            findingSQL = self.mongo.read("DayInfo", "Analys", query, client=self.mongo.client2)
+            findingSQL = self.mongo.read_list_obj("DayInfo", "Analys", query, client=self.mongo.client2)
+            if findingSQL:
+                return pd.DataFrame(findingSQL["data"]).set_index("날짜")
         except Exception:
             print(f"{name} 는 invalid 데이터 입니다.")
             return pd.DataFrame()
-
-        return pd.DataFrame(findingSQL).set_index("날짜")
 if __name__ == "__main__":
     obj = StockAnaly()
-    obj.module(day_info=True, compute_criteria=True)
-    print(obj.readAnalySQL("삼성전자"))
+    obj.module(day_info=False, compute_criteria=False)
     #print(obj.anal_namedict)

@@ -231,7 +231,9 @@ class MongoDB:
         ]
 
         result = list(collections.aggregate(pipeline))
-        return result["data"]
+        if not result:
+            pd.DataFrame()
+        return pd.DataFrame([i["data"] for i in result])
 
 if __name__ == "__main__":
 

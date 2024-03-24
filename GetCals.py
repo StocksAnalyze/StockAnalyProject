@@ -25,6 +25,8 @@ class StockCals:
             self.module_calc()
 
 
+
+
     ''' A. 주식 계산 메소드 '''
     def module_calc(self):
         ''' 초기 day_info.xlsx 로부터 MACD, 60평균선 등을 계산하는데 사용하는 함수 (전데이터 수정)
@@ -34,30 +36,27 @@ class StockCals:
         for company, tk in self.infoObj.thema_total_dict.items():
             cals_last_date = datetime(1999, 1, 1)
             print("[" + company + " 지표 계산중...]")
-            last_cals_30 = self.mongo.read_last_one("DayInfo", "Cals", "날짜", {"티커": tk}, 30)
             df = None
             try:
-                cals_last_date = pd.to_datetime(last_cals_30.next()["날짜"])
-                before = self.mongo.read_last_one("DayInfo", "Info", "날짜", {"날짜": {"$lt": cals_last_date}, "티커": tk}, 120)
-                last_docunment = None
-                for document in before:
-                    last_docunment = document
-
-                after = None
-                if last_docunment:
-                    after = self.mongo.read("DayInfo", "Info", {"날짜": {"$gte": last_docunment["날짜"]}, "티커": tk})
-                    df = pd.DataFrame(after).set_index("날짜")
-                    info_last_date = df.tail(1).index
-                    diff_day = info_last_date - cals_last_date
-                    if diff_day.days == 0:
+                last_date_info = self.mongo.read_last_date("DayInfo", "Info", {"티커": tk})
+                last_date_cals = self.mongo.read_last_date("DayInfo", "Cals", {"티커": tk})
+                if last_date_info and last_date_cals:
+                    difference = last_date_info["날짜"] - last_date_cals["날짜"]
+                    if difference.days == 0:
                         continue
-                if not after:
+                    before = self.mongo.read_date_limits("DayInfo", "Info", {"티커": tk}, limits=difference.days + 120)
+                    df = pd.DataFrame(before).set_index("날짜")
+                    if not df.empty:
+                        df = df.iloc[::-1]
+                    else:
+                        df = self.infoObj.readDaySQL(company)
+                    cals_last_date = last_date_cals["날짜"]
+                else:
+                    if not last_date_info:
+                        continue
                     df = self.infoObj.readDaySQL(company)
-            except StopIteration:
-                try:
-                    df = self.infoObj.readDaySQL(company)
-                except KeyError:
-                    continue
+            except KeyError:
+                df = self.infoObj.readDaySQL(company)
 
             self.saved_df = pd.DataFrame(index=df.index)
 
@@ -78,7 +77,7 @@ class StockCals:
                 print("{" + str(self.high_crit) + "일 최고가(highest price) 계산 중 ...}")
                 self.highest_price(cal_df=df)
                 #print(self.saved_df.tail(5))
-            except KeyError:
+            except Exception:
                 continue
 
             self.saved_df = self.saved_df.reset_index()
@@ -88,11 +87,9 @@ class StockCals:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore") # 워닝 무시
                 ret_dict = processing_frame.to_dict(orient="records")
-                for rec in ret_dict:
-                    rec["회사명"] = company
-                    rec["티커"] = tk
+
             print(ret_dict)
-            self.mongo.insert("DayInfo", "Cals", ret_dict)
+            self.mongo.insert_list("DayInfo", "Cals", [company, tk], ret_dict)
 
 
     def movingAverage(self, cal_df: pd.DataFrame):
@@ -130,16 +127,21 @@ class StockCals:
         :param cal_df: 저장할 DataFrame
         :return:
 
+        전환선 (conversion line) = (9-period high + 9-period low)/2
+        기준선 (base line) = (26-period high + 26-period low)/2
+        선행스팬 A (Leading Span A, green) = (convesion line + base line)/2, 구름의 경계값
+        선행스팬 B (Leading Span B, red) = (52-period high + 52-period low)/2, 구름의 두번째 경계값
+        후행스팬 (Lagging Span) = Close plotted 26 days in the past, 현재가를 26일 후행
         '''
-        self.saved_df["전환선"] = (cal_df["고가"].rolling(window=9).max() + cal_df["저가"].rolling(window=9).min()) / 2
-        self.saved_df["기준선"] = (cal_df["고가"].rolling(window=26).max() + cal_df["저가"].rolling(window=26).min()) / 2
-        self.saved_df["선행스팬1"] = ((self.saved_df["기준선"] + self.saved_df["전환선"])/2).shift(26)
-        self.saved_df["선행스팬2"] = ((cal_df["고가"].rolling(window=52).max() + cal_df["저가"].rolling(window=52).min()) / 2).shift(26)
-        self.saved_df["후행스팬"] = cal_df["종가"].shift(-25)
+        self.saved_df["conversion line"] = (cal_df["고가"].rolling(window=9).max() + cal_df["저가"].rolling(window=9).min()) / 2
+        self.saved_df["base line"] = (cal_df["고가"].rolling(window=26).max() + cal_df["저가"].rolling(window=26).min()) / 2
+        self.saved_df["Leading Span A"] = ((self.saved_df["base line"] + self.saved_df["conversion line"])/2).shift(26)
+        self.saved_df["Leading Span B"] = ((cal_df["고가"].rolling(window=52).max() + cal_df["저가"].rolling(window=52).min()) / 2).shift(26)
+        self.saved_df["Lagging Span"] = cal_df["종가"].shift(-25)
         # 주가 지표가 트랜젝션으로 넣을 시 NULL 트랜젝션에 스팬만 들어가게 되는데 그러지 말고
         # 현재 지표를 26일로 당기기 전의 값을 기록. (즉, 계산 시 26일 앞으로 당겨서 봐야함)
-        self.saved_df["선행스팬1_미래"] = ((self.saved_df["기준선"] + self.saved_df["전환선"])/2)
-        self.saved_df["선행스팬2_미래"] = ((cal_df["고가"].rolling(window=52).max() + cal_df["저가"].rolling(window=52).min()) / 2)
+        self.saved_df["Future Leading Span A"] = ((self.saved_df["base line"] + self.saved_df["conversion line"])/2)
+        self.saved_df["Future Leading Span B"] = ((cal_df["고가"].rolling(window=52).max() + cal_df["저가"].rolling(window=52).min()) / 2)
 
     def highest_price(self, cal_df: pd.DataFrame):
         ''' D. high_crit=[9,26] 일 종가 중 최고가?
@@ -149,7 +151,7 @@ class StockCals:
         :return:
         '''
         for high in self.high_crit:
-            naming = str(high) + "일_최고가"
+            naming = str(high) + "th Highest Price"
             self.saved_df[naming] = cal_df["종가"].rolling(window=high).max()
 
 
@@ -169,15 +171,15 @@ class StockCals:
                     {"티커": company}
                 ]
             }
-            findingSQL = self.mongo.read("DayInfo", "Cals", query)
+            findingSQL = self.mongo.read_list_obj("DayInfo", "Cals", query)
+            if findingSQL:
+                return pd.DataFrame(findingSQL["data"]).set_index("날짜")
         except Exception:
             print(f"{company} 는 invalid 데이터 입니다.")
             return pd.DataFrame()
-
-        return pd.DataFrame(findingSQL).set_index("날짜")
 
 if __name__ == "__main__":
     obj = StockCals()
     obj.module()
 
-    print(obj.read_days_cals("삼성전자"))
+    #print(obj.read_days_cals("삼성전자"))

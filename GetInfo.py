@@ -127,8 +127,8 @@ class StockKr:
         print("------------------------")
 
         # 전체 파일리스트 관리.
-        self.thema_total_dict.update(self.thema_KOSPI_tkdict)
-        self.thema_total_dict.update(self.thema_KOSDAQ_tkdict)
+        #self.thema_total_dict.update(self.thema_KOSPI_tkdict)
+        #self.thema_total_dict.update(self.thema_KOSDAQ_tkdict)
 
 
     ''' B. Day Information (일봉 시가, 고가, 매도 정보 크롤링...) _ Junhyeong(20190511) '''
@@ -141,12 +141,15 @@ class StockKr:
         '''
 
         for company, tr_code in self.thema_total_dict.items():
-            last_date = self.mongo.read_last_one("DayInfo", "Info","날짜", {"티커": tr_code})
+            #last_date = self.mongo.read_last_one("DayInfo", "Info","날짜", {"티커": tr_code})
+            last_date_obj = self.mongo.read_list_obj("DayInfo", "Info", "날짜", {"티커": tr_code})
             # 없는 경우 새 갱신 - 기본 120일..
-            start_dt = self.day_counter(offset=200, pos=-1)
+            start_dt = self.day_counter(offset=230, pos=-1)
 
-            if last_date:
-                start_dt = last_date["날짜"] + timedelta(days=1)
+            if last_date_obj:
+                last_date = self.mongo.read_last_date("DayInfo", "Info", {"회사명": company})
+                if last_date:
+                    start_dt = last_date["날짜"] + timedelta(days=1)
 
             print(f"{company} 회사의 일봉 데이터를 가져오는중 ...")
             self.get_day_info(company, tr_code, start_dt)
@@ -162,19 +165,23 @@ class StockKr:
         while base < global_today:
             try:
                 df = self.get_day_info_krx(tr_code=tk, start_dt=base, end_dt=base_end)
+                if df.empty:
+                    return
             except Exception:
                 return
             base = df.index[-1] + timedelta(days=1)
             base_end = self.day_counter(base, 80, 1)
 
+            df = df.drop(columns=["시가"])
             # DataFrame --> Dictionary (열 이름 겹침 워닝은 무시하도록 설정)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore") # 워닝 무시
                 df_to_dict = df.reset_index().to_dict(orient="records")
-                for rec in df_to_dict:
-                    rec["회사명"] = company
-                    rec["티커"] = tk
-            self.mongo.insert("DayInfo", "Info", df_to_dict, primaryKeySet=False)
+
+            print(df_to_dict)
+            self.mongo.insert_list("DayInfo", "Info",[company, tk], df_to_dict,
+                                   primaryKey=tk, primaryKeySet=True)
+
 
     def get_day_info_krx(self, tr_code: str, start_dt: datetime, end_dt: datetime, mode="d")\
             -> pd.DataFrame:
@@ -189,6 +196,7 @@ class StockKr:
         start = self.convert_date_string(start_dt) ; end = self.convert_date_string(end_dt)
         print("{종가,시가,고가,거래량을 가져오는 중 ...}")
         df1 = stock.get_market_ohlcv(start, end, tr_code, mode)
+        '''
         print("{시가총액 정보를 가져오는 중 ...}")
         df2 = stock.get_market_cap(start, end, tr_code, mode)
         print("{매수 거래량을 가져오는 중 ...}")
@@ -199,12 +207,11 @@ class StockKr:
         df3.columns = name_list
         print("{매도 거래량을 가져오는 중 ...}")
         df4 = stock.get_market_trading_volume_by_date(start, end, tr_code, on="매도")
-        '''
         # 공매도 잔고는 3일전이라 NaN 데이터가 들어가므로 이는 따로 구하는게 좋아보임
         ## Author : Junhyeong(20190511)
         print("{공매도, 상장수, 시총, 공매도 비중 정보를 가져오는중 ...}")
         df5 = stock.get_shorting_balance_by_date(start, end, tr_code)
-        '''
+        
         name_list2 = []
         for item in df4.columns:
             name_list2.append(str(item) + "_매도")
@@ -213,7 +220,8 @@ class StockKr:
         df = df.loc[:, ~df.T.duplicated()]
         if len(df) != 0:
             print(df.tail(5))
-        return df
+            '''
+        return df1 #df
 
     ''' C. Read SQL Mehtod (Day Info Crawling Information Method) _ Junhyeong(20190511) '''
     def readDaySQL(self, company: str) -> pd.DataFrame:
@@ -231,11 +239,12 @@ class StockKr:
                     {"티커": company}
                 ]
             }
-            findingSQL = self.mongo.read("DayInfo", "Info", query)
+            findingSQL = self.mongo.read_list_obj("DayInfo", "Info", query)
+            if findingSQL:
+                return pd.DataFrame(findingSQL["data"]).set_index("날짜")
         except Exception:
             print(f"{company} 는 invalid 데이터 입니다.")
             return pd.DataFrame()
-        return pd.DataFrame(findingSQL).set_index("날짜")
 
     ''' D. 거래량 상위 회사 추출 메소드 _ Junhyeong (20190511) '''
     def find_small_module(self, rank=10):
